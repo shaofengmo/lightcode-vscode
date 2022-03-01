@@ -2,11 +2,11 @@
 	"name": "lightcodeios",
 	"displayName": "Lightcode iOS Debug",
 	"version": "0.0.4",
-	"publisher": "kenny",
+	"publisher": "shaofeng",
 	"description": "Debug iOS apps on iPhone",
-	"repository": "https://github.com/khitcher/lightcode-doc",
+	"repository": "https://github.com/shaofengmo/lightcode-vscode",
 	"author": {
-		"name": "kenny"
+		"name": "shaofeng"
 	},
 	"icon": "images/lldb.png",
 	"categories": [
