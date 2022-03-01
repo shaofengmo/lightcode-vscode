@@ -2,7 +2,7 @@
 	"name": "lightcodeios",
 	"displayName": "Lightcode iOS Debug",
 	"version": "0.0.5",
-	"publisher": "shaofeng",
+	"publisher": "kenny",
 	"description": "Debug iOS apps on iPhone",
 	"repository": "https://github.com/shaofengmo/lightcode-vscode",
 	"author": {
