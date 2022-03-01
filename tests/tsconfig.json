@@ -1,0 +1,23 @@
+{
+	"compilerOptions": {
+		"target": "es2017",
+		"module": "commonjs",
+		"moduleResolution": "node",
+		"esModuleInterop": true,
+		"alwaysStrict": true,
+		"noImplicitAny": true,
+		"removeComments": false,
+		"preserveConstEnums": true,
+		"sourceMap": true,
+		"baseUrl": ".",
+		"paths": {
+			"extension/*": [
+				"../extension/*"
+			],
+			"*": [
+				"../build/node_modules/*",
+				"../build/node_modules/@types/*",
+			]
+		}
+	}
+}

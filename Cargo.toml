@@ -1,0 +1,5 @@
+[workspace]
+members = ["adapter", "debuggee"]
+
+[profile.release]
+debug = true

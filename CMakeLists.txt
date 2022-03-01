@@ -1,0 +1,351 @@
+cmake_minimum_required(VERSION 3.10)
+project(CodeLLDB)
+enable_testing()
+
+set(VERSION "1.6.8") # Base version
+
+include(cmake/CopyFiles.cmake)
+
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_INSTALL_PREFIX $ENV{HOME}/.vscode/extensions/vscode-lldb CACHE PATH "Install location")
+
+set(VERSION_SUFFIX "-" CACHE INTERNAL "Version suffix")
+if (VERSION_SUFFIX STREQUAL "-")
+    string(TIMESTAMP VERSION_SUFFIX "-dev.%y%m%d%H%M" UTC)
+endif()
+set(VERSION "${VERSION}${VERSION_SUFFIX}")
+message("Version ${VERSION}")
+
+set(LLDB_PACKAGE $ENV{LLDB_PACKAGE} CACHE PATH "Zip archive containing LLDB files")
+if (LLDB_PACKAGE)
+    message("Using LLDB_PACKAGE=${LLDB_PACKAGE}")
+else()
+    message(FATAL_ERROR "LLDB_PACKAGE not set." )
+endif()
+
+set(TEST_TIMEOUT 5000 CACHE STRING "Test timeout [ms]")
+
+# General OS-specific definitions
+if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+    set(DylibPrefix lib)
+    set(DylibSuffix .so)
+    set(NPM npm)
+    set(PathSep ":")
+    set(DefaultTarget x86_64-unknown-linux-gnu)
+    set(AllowedDependencies liblldb.so libpython3.* linux-vdso.so.1 librt.so.1 libdl.so.2 libpthread.so.0 libgcc_s.so.1
+                            libm.so.6 libc.so.6 libexpat.so.1 libz.so.1 libutil.so.1
+                            /lib64/ld-linux-x86-64.so.2)
+elseif (${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
+    set(DylibPrefix lib)
+    set(DylibSuffix .dylib)
+    set(SymSuffix .dSYM)
+    set(NPM npm)
+    set(PathSep ":")
+    set(DefaultTarget x86_64-apple-darwin)
+    set(AllowedDependencies Foundation CoreFoundation CoreServices Security SystemConfiguration
+                            libcompression.dylib libz.1.dylib libSystem.B.dylib libc...1.dylib
+                            libresolv.*.dylib libpmenergy.dylib libpmsample.dylib libobjc.A.dylib libiconv.*.dylib
+                            libcodelldb.dylib liblldb.dylib libpython3.*.dylib)
+elseif (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
+    set(ExeSuffix .exe)
+    set(DylibSuffix .dll)
+    set(SymSuffix .pdb)
+    set(NPM npm.cmd)
+    set(PathSep "$<SEMICOLON>")
+    set(DefaultTarget x86_64-pc-windows-msvc)
+    set(AllowedDependencies api-ms-.* WS2_32.dll KERNEL32.dll  NTDLL.dll ADVAPI32.dll VCRUNTIME140.dll MSVCP140.dll
+                            USER32.dll VERSION.dll DBGHELP.dll PSAPI.DLL OLEAUT32.dll SHLWAPI.dll  RPCRT4.dll
+                            python3.*.dll liblldb.dll)
+else()
+    message(FATAL_ERROR "${CMAKE_SYSTEM_NAME} target is not supported by this build script.")
+endif()
+
+string(JOIN "|" AllowedDependencies ${AllowedDependencies}) # Compose a regex
+
+find_package(Python3 COMPONENTS Interpreter)
+
+if (NOT LLVM_TRIPLE)
+set(LLVM_TRIPLE ${DefaultTarget})
+endif()
+
+set(WithEnv ${CMAKE_COMMAND} -E env)
+set(UpdateFile ${CMAKE_COMMAND} -E copy_if_different)
+
+
+# Adapter
+
+add_subdirectory(adapter)
+add_subdirectory(lldb)
+add_subdirectory(formatters)
+
+add_dependencies(codelldb_lib lldb formatters)
+
+# Extension package content
+
+set(PLATFORM_PACKAGE_URL "https://github.com/vadimcn/vscode-lldb/releases/download/v\${version}/\${platformPackage}" CACHE STRING "")
+configure_file(package.json ${CMAKE_CURRENT_BINARY_DIR}/package.json @ONLY)
+configure_file(webpack.config.js ${CMAKE_CURRENT_BINARY_DIR}/webpack.config.js @ONLY)
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/package-lock.json DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+
+# Run 'npm install'
+execute_process(
+    COMMAND ${NPM} ci # like install, but actually respects package-lock file.
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    RESULT_VARIABLE Result
+)
+if (NOT ${Result} EQUAL 0)
+    message(FATAL_ERROR "npm intall failed: ${Result}")
+endif()
+
+# Copy it back, so we can commit the lock file.
+file(COPY ${CMAKE_CURRENT_BINARY_DIR}/package-lock.json DESTINATION ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_custom_target(update_lockfiles
+    COMMAND ${UpdateFile} ${CMAKE_CURRENT_SOURCE_DIR}/package-lock.json ${CMAKE_CURRENT_BINARY_DIR}/package-lock.json
+    COMMAND ${NPM} update
+    COMMAND ${UpdateFile} ${CMAKE_CURRENT_BINARY_DIR}/package-lock.json ${CMAKE_CURRENT_SOURCE_DIR}/package-lock.json
+    COMMAND cargo update
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    USES_TERMINAL
+)
+
+# Extension and tests
+
+if (CMAKE_BUILD_TYPE MATCHES Release|RelWithDebInfo)
+    set(WebpackMode production)
+else()
+    set(WebpackMode development)
+endif()
+
+file(GLOB_RECURSE ExtensionFiles ${CMAKE_CURRENT_SOURCE_DIR}/extension/*.ts ${CMAKE_CURRENT_SOURCE_DIR}/extension/*.json)
+add_custom_command(
+    OUTPUT extension.js
+    DEPENDS ${ExtensionFiles}
+    COMMAND ${NPM} run webpack -- --mode=${WebpackMode} --stats=minimal --output-path=${CMAKE_CURRENT_BINARY_DIR} --output-filename=extension.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/extension/main.ts
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    USES_TERMINAL
+)
+add_custom_target(extension
+    DEPENDS extension.js
+)
+
+file(GLOB_RECURSE TestFiles ${CMAKE_CURRENT_SOURCE_DIR}/tests/*.ts ${CMAKE_CURRENT_SOURCE_DIR}/tests/*.json)
+add_custom_command(
+    OUTPUT tests.js
+    DEPENDS ${TestFiles} ${ExtensionFiles}
+    COMMAND ${NPM} run webpack -- --mode=${WebpackMode} --stats=minimal --output-path=${CMAKE_CURRENT_BINARY_DIR} --output-filename=tests.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/adapter.test.ts
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/util.test.ts
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    USES_TERMINAL
+)
+add_custom_target(tests
+    DEPENDS tests.js
+)
+
+# Extension package resources
+# `PackageFiles` is the list name.
+# `${CMAKE_CURRENT_SOURCE_DIR}/README.md` is the source filepath.
+# `${CMAKE_CURRENT_BINARY_DIR}/README.md` is the destination filepath.
+add_copy_file(PackageFiles ${CMAKE_CURRENT_SOURCE_DIR}/README.md ${CMAKE_CURRENT_BINARY_DIR}/README.md)
+add_copy_file(PackageFiles ${CMAKE_CURRENT_SOURCE_DIR}/CHANGELOG.md ${CMAKE_CURRENT_BINARY_DIR}/CHANGELOG.md)
+add_copy_file(PackageFiles ${CMAKE_CURRENT_SOURCE_DIR}/images/lldb.png ${CMAKE_CURRENT_BINARY_DIR}/images/lldb.png)
+add_copy_file(PackageFiles ${CMAKE_CURRENT_SOURCE_DIR}/images/breakpoint.png ${CMAKE_CURRENT_BINARY_DIR}/images/breakpoint.png)
+add_copy_file(PackageFiles ${CMAKE_CURRENT_SOURCE_DIR}/images/launchjson.png ${CMAKE_CURRENT_BINARY_DIR}/images/launchjson.png)
+add_copy_file(PackageFiles ${CMAKE_CURRENT_SOURCE_DIR}/images/runbuttonlocation.png ${CMAKE_CURRENT_BINARY_DIR}/images/runbuttonlocation.png)
+add_copy_file(PackageFiles ${CMAKE_CURRENT_SOURCE_DIR}/images/user.svg ${CMAKE_CURRENT_BINARY_DIR}/images/user.svg)
+add_copy_file(PackageFiles ${CMAKE_CURRENT_SOURCE_DIR}/images/users.svg ${CMAKE_CURRENT_BINARY_DIR}/images/users.svg)
+add_copy_file(PackageFiles ${CMAKE_CURRENT_SOURCE_DIR}/syntaxes/disassembly.json ${CMAKE_CURRENT_BINARY_DIR}/syntaxes/disassembly.json)
+
+# For extension debugging
+
+add_custom_target(dev_debugging
+    DEPENDS codelldb debuggee extension ${PackageFiles}
+)
+
+# VSIX packages
+
+set(PackagedFilesBootstrap
+    README.md
+    CHANGELOG.md
+    extension.js
+    images/*
+    syntaxes/*
+)
+
+set(PackagedFilesFull
+    ${PackagedFilesBootstrap}
+    platform.ok
+    adapter/*.py
+    adapter/codelldb
+    adapter/codelldb.exe
+    adapter/libcodelldb.so
+    adapter/libcodelldb.dylib
+    adapter/codelldb.dll
+    adapter/codelldb_python.dll
+    lldb/bin/**/*
+    lldb/lib/**/*
+    lldb/DLLs/**/*
+    formatters/**/*.py
+    node_modules/**/*
+)
+
+# Indicator file used to determine whether we have the platform package.
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/platform.ok "")
+
+set(Content **)
+foreach(Line ${PackagedFilesBootstrap})
+    set(Content ${Content}\n!${Line})
+endforeach()
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/vscodeignore-bootstrap ${Content})
+
+set(Content **)
+foreach(Line ${PackagedFilesFull})
+    set(Content ${Content}\n!${Line})
+endforeach()
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/vscodeignore-full ${Content})
+
+set(VsceOptions
+    --baseContentUrl https://github.com/vadimcn/vscode-lldb/blob/v${VERSION}
+    --baseImagesUrl https://github.com/vadimcn/vscode-lldb/raw/v${VERSION}
+)
+
+add_custom_target(vsix_bootstrap
+    DEPENDS extension ${PackageFiles}
+    COMMAND ${UpdateFile} ${CMAKE_CURRENT_BINARY_DIR}/vscodeignore-bootstrap ${CMAKE_CURRENT_BINARY_DIR}/.vscodeignore
+    COMMAND ${NPM} run vsce -- package ${VsceOptions} -o ${CMAKE_CURRENT_BINARY_DIR}/codelldb-bootstrap.vsix
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    USES_TERMINAL
+)
+
+add_custom_target(vsix_full
+    DEPENDS extension lldb codelldb ${PackageFiles}
+    COMMAND ${UpdateFile} ${CMAKE_CURRENT_BINARY_DIR}/vscodeignore-full ${CMAKE_CURRENT_BINARY_DIR}/.vscodeignore
+    COMMAND ${NPM} run vsce -- package ${VsceOptions} -o ${CMAKE_CURRENT_BINARY_DIR}/codelldb-full.vsix
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    USES_TERMINAL
+)
+
+# Strip native binaries if building vsix_full
+
+if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+    if (NOT CMAKE_STRIP)
+        set(CMAKE_STRIP strip)
+    endif()
+
+    add_custom_target(strip_binaries
+        DEPENDS lldb codelldb
+        COMMAND find ${CMAKE_CURRENT_BINARY_DIR}/adapter -type f "\\(" -executable -o -name "*.so" -o -name "*.so.*" "\\)" -print -exec ${CMAKE_STRIP} --strip-debug "{}" "\;"
+        COMMAND find ${CMAKE_CURRENT_BINARY_DIR}/lldb     -type f "\\(" -executable -o -name "*.so" -o -name "*.so.*" "\\)" -not -name "*.py" -print -exec ${CMAKE_STRIP} --strip-debug "{}" "\;"
+        COMMENT "Stripping debug info"
+        USES_TERMINAL
+    )
+    add_dependencies(vsix_full strip_binaries)
+endif()
+
+# Build both VSIX packages, then extract vsix_bootstrap to build/extracted
+
+add_custom_target(vsix_extracted
+    DEPENDS vsix_bootstrap vsix_full
+    COMMAND rm -rf ${CMAKE_CURRENT_BINARY_DIR}/extracted
+    COMMAND unzip -o ${CMAKE_CURRENT_BINARY_DIR}/codelldb-full.vsix -d ${CMAKE_CURRENT_BINARY_DIR}/extracted
+    COMMAND ${UpdateFile} ${CMAKE_CURRENT_BINARY_DIR}/extension/*.map ${CMAKE_CURRENT_BINARY_DIR}/extracted/extension/extension
+)
+
+# Debuggee
+
+if (NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/debuggee)
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} ${CMAKE_SOURCE_DIR}/debuggee -G "${CMAKE_GENERATOR}"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/debuggee
+    )
+    add_custom_target(debuggee
+        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_CURRENT_BINARY_DIR}/debuggee
+    )
+else()
+    # On Windows we want to check both MSVC PDB and GNU DWARF debug info kinds.
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/debuggee-msvc)
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} ${CMAKE_SOURCE_DIR}/debuggee -G "${CMAKE_GENERATOR}" -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/debuggee-msvc
+    )
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/debuggee-gnu)
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} ${CMAKE_SOURCE_DIR}/debuggee -G "${CMAKE_GENERATOR}" -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/debuggee-gnu
+    )
+    add_custom_target(debuggee
+        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_CURRENT_BINARY_DIR}/debuggee-msvc
+        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_CURRENT_BINARY_DIR}/debuggee-gnu
+    )
+endif()
+
+# Tests
+
+set(MochaTest ${NPM} run mocha --
+    -u tdd --timeout ${TEST_TIMEOUT} --exit
+    --require source-map-support/register
+    #-g "rust_variables"
+    ${CMAKE_BINARY_DIR}/tests.js
+)
+
+# Build everything for testing
+add_dependencies(tests codelldb debuggee)
+
+# Tests and test targets
+
+if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
+    set(TestTriples x86_64-pc-windows-gnu x86_64-pc-windows-msvc)
+elseif (${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
+    set(TestTriples x86_64-apple-darwin)
+else()
+    set(TestTriples x86_64-unknown-linux-gnu)
+endif()
+
+foreach(TestTriple ${TestTriples})
+    set(TestName adapter:${TestTriple})
+    add_test(NAME ${TestName}
+        COMMAND ${WithEnv} TARGET_TRIPLE=${TestTriple} NODE_PATH=${CMAKE_BINARY_DIR} BUILD_DIR=${CMAKE_BINARY_DIR} SOURCE_DIR=${CMAKE_SOURCE_DIR} ${MochaTest}
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    set_property(TEST ${TestName} PROPERTY RUN_SERIAL TRUE)
+endforeach(TestTriple)
+
+# Run adapter tests
+add_custom_target(check_adapter
+    DEPENDS codelldb debuggee tests
+    COMMAND ${CMAKE_CTEST_COMMAND} -R "adapter:" --verbose
+    USES_TERMINAL
+)
+
+# Run all tests
+add_custom_target(check
+    DEPENDS codelldb debuggee tests cargo_test
+    COMMAND ${CMAKE_CTEST_COMMAND} --verbose
+    USES_TERMINAL
+)
+
+# Install
+
+install(CODE "file(REMOVE_RECURSE \"${CMAKE_INSTALL_PREFIX}/codelldb\")")
+install(
+    DIRECTORY ${ExtensionRoot}
+    DESTINATION .
+)
+
+# XtraClean
+
+add_custom_target(xclean
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target clean
+    COMMAND ${CMAKE_COMMAND} -E remove_directory CMakeFiles
+    COMMAND ${CMAKE_COMMAND} -E remove_directory adapter
+    COMMAND ${CMAKE_COMMAND} -E remove_directory debuggee
+    COMMAND ${CMAKE_COMMAND} -E remove_directory extension
+    COMMAND ${CMAKE_COMMAND} -E remove_directory lldb
+    COMMAND ${CMAKE_COMMAND} -E remove_directory node_modules
+    COMMAND ${CMAKE_COMMAND} -E remove_directory target
+    COMMAND ${CMAKE_COMMAND} -E remove_directory tests
+    COMMAND ${CMAKE_COMMAND} -E remove_directory tmp
+    COMMAND ${CMAKE_COMMAND} ..
+)

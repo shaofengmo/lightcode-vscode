@@ -1,0 +1,197 @@
+{
+	"name": "lightcodeios",
+	"displayName": "Lightcode iOS Debug",
+	"version": "0.0.4",
+	"publisher": "kenny",
+	"description": "Debug iOS apps on iPhone",
+	"repository": "https://github.com/khitcher/lightcode-doc",
+	"author": {
+		"name": "kenny"
+	},
+	"icon": "images/lldb.png",
+	"categories": [
+		"Debuggers"
+	],
+	"keywords": [
+		"iOS",
+		"Swift",
+		"Objective-C",
+		"Debug",
+		"Xcode"
+	],
+	"private": true,
+	"engines": {
+		"vscode": "^1.31.0"
+	},
+	"dependencies": {
+		"ios-deploy": "github:ios-control/ios-deploy",
+		"stream-json": "^1.7.3",
+		"string-argv": "^0.3.1",
+		"tree-kill": "^1.2.2",
+		"yaml": "^1.10.0",
+		"yauzl": "^2.10.0"
+	},
+	"devDependencies": {
+		"@types/mocha": "^7.0.1",
+		"@types/node": "^8.10.50",
+		"@types/stream-json": "^1.7.2",
+		"@types/vscode": "^1.31.0",
+		"@types/yauzl": "^2.9.0",
+		"memory-streams": "^0.1.3",
+		"mocha": "^8.4.0",
+		"source-map-support": "^0.5.12",
+		"ts-loader": "^8.0.0",
+		"typescript": "^4.2.4",
+		"vsce": "^1.88.0",
+		"vscode-debugadapter-testsupport": "^1.47.0",
+		"vscode-debugprotocol": "^1.47.0",
+		"webpack": "^5.37.1",
+		"webpack-cli": "^4.7.0"
+	},
+	"scripts": {
+		"vsce": "vsce",
+		"mocha": "mocha",
+		"tsc": "tsc",
+		"webpack": "webpack"
+	},
+	"main": "extension.js",
+	"activationEvents": [
+		"onDebug",
+		"onUri",
+		"onStartupFinished"
+	],
+	"contributes": {
+		"breakpoints": [
+			{
+				"language": "c"
+			},
+			{
+				"language": "cpp"
+			},
+			{
+				"language": "objective-c"
+			},
+			{
+				"language": "objective-cpp"
+			},
+			{
+				"language": "swift"
+			}
+		],
+		"debuggers": [
+			{
+				"type": "lightcode",
+				"label": "Lightcode",
+				"languages": [
+					"c",
+					"cpp",
+					"objective-c",
+					"objective-cpp",
+					"swift"
+				],
+				"configurationAttributes": {
+					"launch": {
+						"properties": {
+							"required": ["program", "buildCommand", "appBundleId"],
+							"program": {
+								"description": "Path to the program to debug.",
+								"type": "string",
+								"default": "where TF is this program"
+							},
+							"buildCommand": {
+								"description": "A command to build the app, such as `buck build MyCompany:AppName`",
+								"type": "string"
+							},
+							"appBundleId": {
+								"description": "Bundle identifier of the app. Can be found in Xcode.",
+								"type": "string"
+							},
+							"sourceMap": {
+								"description": "Source path remapping between the build machine and the local machine.  Each item is a pair of remote and local path prefixes.",
+								"type": "object",
+								"patternProperties": {
+									".*": {
+										"type": [
+											"string",
+											"null"
+										]
+									}
+								},
+								"default": {}
+							}
+						}
+					},
+					"attach": {
+						"properties": {
+							"required": ["program", "buildCommand", "appBundleId"],
+							"program": {
+								"description": "Path to the program to debug.",
+								"type": "string",
+								"default": "where TF is this program"
+							},
+							"buildCommand": {
+								"description": "A command to build the app, such as `buck build MyCompany:AppName`",
+								"type": "string"
+							},
+							"appBundleId": {
+								"description": "Bundle identifier of the app. Can be found in Xcode.",
+								"type": "string"
+							},
+							"sourceMap": {
+								"description": "Source path remapping between the build machine and the local machine.  Each item is a pair of remote and local path prefixes.",
+								"type": "object",
+								"patternProperties": {
+									".*": {
+										"type": [
+											"string",
+											"null"
+										]
+									}
+								},
+								"default": {}
+							}
+						}
+					}
+				},
+				"configurationSnippets": [
+					{
+						"label": "Lightcode: Run",
+						"body": {
+							"name": "Run",
+							"type": "lightcode",
+							"request": "launch",
+							"program": "${workspaceFolder}/build/Debug-iphoneos/<App Name>.app",
+							"buildCommand": "xcodebuild -configuration Debug -sdk iphoneos -allowProvisioningUpdates",
+							"appBundleId": "<Bundle Identifier of the app>"
+						}
+					},
+					{
+						"label": "Lightcode: Attach",
+						"body": {
+							"name": "Attach",
+							"type": "lightcode",
+							"request": "attach",
+							"program": "${workspaceFolder}/build/Debug-iphoneos/<App Name>.app",
+							"buildCommand": "xcodebuild -configuration Debug -sdk iphoneos -allowProvisioningUpdates",
+							"appBundleId": "<Bundle Identifier of the app>"
+						}
+					}
+				]
+			}
+		]
+	},
+	"config": {
+		"platformPackages": {
+			"url": "@PLATFORM_PACKAGE_URL@",
+			"platforms": {
+				"x64-linux": "codelldb-x86_64-linux.vsix",
+				"arm64-linux": "codelldb-aarch64-linux.vsix",
+				"arm-linux": "codelldb-arm-linux.vsix",
+				"x64-darwin": "codelldb-x86_64-darwin.vsix",
+				"arm64-darwin": "codelldb-aarch64-darwin.vsix",
+				"x64-win32": "codelldb-x86_64-windows.vsix",
+				"ia32-win32": "codelldb-x86_64-windows.vsix"
+			}
+		}
+	}
+}
