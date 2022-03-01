@@ -71,14 +71,6 @@ The `Run` and `Attach` configurations share the same 6 fields. Here is the defin
 }
 ```
 
-# FAQ
-- TODO: build systems & VSCode IntelliSense
-
-# Feedback
-Feedback on how to improve the extension is really appreciated
-* [Github issues](https://github.com/khitcher/lightcode-doc/issues)
-* Email me: kennyhitcher at gmail dot com
-
 # Acknowledgement
 - The LLDB part of the extension is a fork from [CodeLLDB](https://marketplace.visualstudio.com/items?itemName=vadimcn.vscode-lldb)
 - The iOS part of the extension is a fork from [iOS debug](https://marketplace.visualstudio.com/items?itemName=nisargjhaveri.ios-debug)
